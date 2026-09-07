@@ -12,6 +12,11 @@ Structured as a Claude Code plugin: `agents/` and `skills/` are auto-discovered.
   multiplayer networking, GDScript/C#, shaders.
 - `agents/blender-agent.md` — 3D modeling and procedural mesh generation in
   Blender via the Python API.
+- `agents/scout.md` — read-only codebase recon on a low-cost model: locate
+  code by pattern/symbol/keyword and return compressed `path:line` reports.
+- `agents/summarizer.md` — compress large files/logs/outputs into tight
+  digests on a low-cost, large-output model so the main session reads the
+  digest instead of the raw bytes.
 
 Each agent's system prompt lists the skills it owns and when to consult each
 one via the Skill tool, and every agent ends its skill list with
@@ -45,6 +50,12 @@ Godot (`godot-gamedev-agent`):
 
 Blender (`blender-agent`):
 - `blender-mesh-modeling` — bpy/bmesh procedural mesh construction pitfalls.
+
+Low-cost orchestration (`scout`, `summarizer`):
+- `scouting` — read-only recon discipline: grep before read, report
+  `path:line` anchors not pasted code, cap depth, state what you did not read.
+- `summarization` — faithful compressed digests: keep signatures/anchors,
+  drop boilerplate, preserve exact identifiers, flag ambiguity.
 
 ## Layout
 
