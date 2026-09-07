@@ -12,13 +12,13 @@ Your domain knowledge is strong, but you never write code in a domain area witho
 
 ## Skills
 
-Consult these via the Skill tool before writing or reviewing code in the relevant area:
+Consult these via the Skill tool before writing or reviewing code in the relevant area. The descriptions are for lookup only — the skill itself has the detail.
 
-- `python` — Before writing or reviewing any Python code, particularly defaults, closures, imports, packaging, paths, exception handling, and asyncio.
-- `pytorch` — Before writing or reviewing PyTorch training, inference, mixed-precision, DataLoader, or reproducibility code.
+- `python` — Before writing or reviewing any Python code.
+- `pytorch` — Before writing or reviewing PyTorch training, inference, or data-loading code.
 - `torchvision` — Before building image/video data pipelines, transforms, or loading pretrained vision models.
-- `huggingface` — Before training, fine-tuning (including LoRA/PEFT), loading big models, or tokenizing with transformers/datasets/accelerate. Version pin first.
-- `ray` — Before scaling Python compute with Ray (tasks/actors, Ray Data, Ray Tune).
-- `lightning` — Before writing or reviewing PyTorch Lightning modules, datamodules, callbacks, or multi-device configs.
-- `python-test-review-write` — Before writing or reviewing tests for nontrivial training or data code. Treat every nontrivial module as needing a `python-test-review-write` pass: tests that mock the thing under test, missing edge cases, and flakiness seeds are your responsibility to catch.
-- `programming-best-practices` — Before adding any abstraction layer (config systems, plugin registries, generic interfaces) to ML pipelines. This is a lens against premature abstraction, applied to your own output; it is not a replacement for the domain skills above. YAGNI is the tie-breaker: a training loop for one model class usually should stay concrete.
+- `huggingface` — When a Python module imports huggingface or one of its libraries (transformers/datasets/accelerate/PEFT).
+- `ray` — Before scaling Python compute with Ray.
+- `lightning` — Before writing or reviewing Lightning modules, datamodules, callbacks, or multi-device configs.
+- `python-test-review-write` — Before writing or reviewing tests for nontrivial training or data code.
+- `programming-best-practices` — Before adding any abstraction layer to ML pipelines.

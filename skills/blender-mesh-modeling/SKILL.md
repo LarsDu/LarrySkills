@@ -1,20 +1,15 @@
 ---
 name: blender-mesh-modeling
-description: Blender procedural mesh modeling and editing via the Python API (bpy/bmesh/bpy.ops). Use whenever creating, modifying, UV-unwrapping, triangulating, or repairing meshes inside Blender, whether through Blender's own script execution (blender --background --python) or an MCP-style socket bridge (e.g. blender-mcp) that runs generated code inside a Blender session.
+description: Blender procedural mesh modeling and editing via the Python API (bpy/bmesh). Use whenever creating, modifying, UV-unwrapping, or repairing meshes inside Blender with `blender --background --python`.
 ---
 
 # Blender mesh modeling (bpy / bmesh)
 
 Targets Blender 4.x (bpy API current as of the 4.5 generation of stubs). Scope: procedural creation and topology manipulation of meshes, UV unwrapping, and topology hygiene (N-gons, non-manifold geometry). Does not cover materials/compositing, rigging/animation, or high-level asset-pipeline orchestration.
 
-## Execution model matters first
+## Execution model
 
-Two ways to run bpy code. The practical recommendation: write code that never depends on `bpy.ops` or ambient editor context, so it works in either model. The bmesh object-mode construction path is the safe default.
-
-- Mode A: `blender --background --python script.py`. Full API, zero bridge, but no window/area context — `bpy.ops` poll-fails often and there is no live viewport feedback.
-- Mode B: MCP-style socket bridge (blender-mcp architecture). An addon in GUI Blender (or under `xvfb-run -a blender`) owns a socket; external MCP server forwards commands, which queue onto Blender's main thread (bpy is not thread-safe). Gives live viewport screenshots and richer feedback, but refuses `--background`.
-
-Whatever the mode, never assume ambient selection/active-object state. Set it explicitly or avoid `bpy.ops` entirely.
+Run bpy code via `blender --background --python script.py`. Full API, but no window/area context — `bpy.ops` poll-fails often and there is no live viewport feedback. Write code that never depends on `bpy.ops` or ambient editor context; the bmesh object-mode construction path is the safe default. Never assume ambient selection/active-object state — set it explicitly or avoid `bpy.ops` entirely.
 
 ## Choosing the right mesh API
 
@@ -125,6 +120,12 @@ bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=0.00001)  # kill zero-are
           loop[uv].uv = (loop.vert.co.x, loop.vert.co.y)
   ```
 
+Choose the unwrap strategy by subject: **hard-surface** models benefit from axis-aligned planar or cube projections (lock axes so UVs stay straight and texel density stays uniform); **organic** models usually need Smart UV Project or angle-based unwrap, where strict axis alignment is undesirable and seams should follow natural cuts.
+
+## Normals
+
+Blender frequently leaves face normals flipped inward on generated geometry — always run `bmesh.ops.recalc_face_normals(bm, faces=bm.faces)` (or `bpy.ops.mesh.normals_make_consistent(inside=False)` in edit mode) before exporting, and verify with a face-orientation overlay.
+
 ## Naming and collection hygiene
 
 Generated content should be isolated so the agent's work is easy to delete and never collides with user data.
@@ -149,11 +150,10 @@ Conventions: `Category_Part` names (the auto-`.001` suffix guarantees uniqueness
 
 ## Sources
 
-- blender-mcp: https://github.com/ahujasid/blender-mcp (addon.py / server.py)
-- arjun988/blender-skills: https://github.com/arjun988/blender-skills (skill format + orchestrator pattern)
 - bpy.types.Mesh.from_pydata: https://docs.blender.org/api/current/bpy.types.Mesh.html
 - bmesh module & types: https://docs.blender.org/api/current/bmesh.html ; https://docs.blender.org/api/current/bmesh.types.BMesh.html
 - bmesh.ops.triangulate: https://docs.blender.org/api/current/bmesh.ops.html
+- bmesh.ops.recalc_face_normals: https://docs.blender.org/api/current/bmesh.ops.html
 - bpy.ops.uv.unwrap / smart_project: https://docs.blender.org/api/current/bpy.ops.uv.html
 - bpy.data.collections: https://docs.blender.org/api/current/bpy.data.collections.html
 - Active object via view_layer (2.8+): https://blender.stackexchange.com/questions/72647 ; https://blender.stackexchange.com/questions/134175

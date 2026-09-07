@@ -1,9 +1,6 @@
 # LarrySkills
 
-Reusable Claude Code agents and skills. Skills are atomic, few-shot Do/Don't
-references (not tutorials) meant to correct or supplement what a model
-already knows, validated against current official documentation and
-community sources rather than written from memory. No emojis.
+Reusable Claude Code agents and skills. Skills are atomic, few-shot Do/Don't references (not tutorials) meant to correct or supplement what a model already knows, validated against current official documentation and community sources rather than written from memory. No emojis.
 
 Structured as a Claude Code plugin: `agents/` and `skills/` are auto-discovered.
 

@@ -5,103 +5,142 @@ description: Shared engineering-judgment skill for every LarrySkills agent. Cons
 
 ## Scope
 
-This is a judgment lens, not a style guide. It does not replace the domain
-skills (pytorch, godot-shaders, blender-mesh-modeling, etc.) — it governs
-whether and when to introduce structure while using them. LLM-generated code
-measurably trends toward two opposite failure modes: premature abstraction
-(interfaces/factories with one implementation) and copy-paste churn (real
-duplication left unmerged). Both come from not identifying the actual reason
-code would change. Everything below is aimed at that judgment call.
-
-## The load-bearing rule: name the second thing
-
-Before extracting an interface, base class, strategy, config flag, or shared
-function, name a concrete second consumer, variant, or implementation that
-exists *right now*. Not one you expect next quarter — one that exists today.
-
-- Do: two call sites already need different bbox-normalization backends ->
-  extract `normalize_bbox(verts, backend)`.
-- Don't: one call site, but "we might support a second backend later" ->
-  write the concrete function, not a `NormalizerStrategy` base class.
-
-If you can't name the second thing, write the concrete version and stop.
+This is a judgment lens, not a style guide. It does not replace the domain skills — it governs whether and when to introduce structure while using them. LLM-generated code measurably trends toward two opposite failure modes: premature abstraction (interfaces/factories with one implementation) and copy-paste churn (real duplication left unmerged). Both come from not identifying the actual reason code would change. Everything below is aimed at that judgment call.
 
 ## SOLID — apply at real boundaries, not by reflex
 
 ### Single Responsibility
-Group code by what changes together, not by mechanical role-splitting.
+Group code by what changes together, not by mechanical role-splitting. Require two named reasons to change (two people or systems you can point to) before splitting a cohesive unit.
 
 ```python
-# Do
+# Do — total and persistence change on different schedules
 class Invoice:
     def total(self) -> float:
         return sum(i.amount for i in self.items)
-# persistence/email live in separate functions only because they
-# genuinely change on a different schedule (different stakeholders)
 
-# Don't: one 20-line operation split into a "responsibility" per step
+def save(invoice: Invoice, db: DB) -> None:
+    db.write(invoice)
+
+# Don't — one operation split into a "responsibility" per step
 class Stage1Validate: ...
 class Stage2ComputeTax: ...
 class Stage3FormatRows: ...
 ```
-Require two *named* reasons to change (two people/systems you can point to)
-before splitting a cohesive unit. "What counts as a reason to change" is
-famously fuzzy even in Robert Martin's own definition — don't let that fuzz
-default to maximal splitting.
 
 ### Open/Closed
-Add behavior by adding a case, when a second real variant exists.
+A class, method, or function should be open for extension but closed for modification: add new behavior by adding new code, not by editing existing code. A plain conditional is fine when every case is already known; reach for dispatch only when new variants actually arrive.
 
 ```python
-# Do (variants are real and known)
-def discount_for(kind: str, amount: float) -> float:
-    if kind == "loyalty": return amount * 0.9
-    if kind == "clearance": return amount * 0.5
-    return amount
+# Do — a new RPG class is added by adding a case; existing ones are untouched
+def damage_for(role: str, base: float) -> float:
+    if role == "warrior": return base * 1.2
+    if role == "mage":    return base * 0.8
+    return base
 
-# Don't: registry/factory built for a single known case
-class DiscountStrategy(ABC): ...
-class DiscountStrategyFactory: ...
+# Don't — registry/factory built for a single known case
+class DamageStrategy(ABC): ...
+class DamageStrategyFactory: ...
 ```
-If you already know every type and don't expect new *behavior* to be layered
-on top of them uniformly, a plain conditional is the OCP-compliant answer —
-dynamic dispatch adds an indirection that only pays off once real extension
-happens.
 
 ### Liskov Substitution
-Treat this as a contract check, not a hierarchy-design mandate. The canonical
-failure is subclassing a mutable `Rectangle` with `Square` (setting width
-silently breaks the height invariant) — fix by not forcing an is-a
-relationship where the contract doesn't hold, not by adding `isinstance`
-special-casing to paper over it. Don't build a deep hierarchy pre-emptively
-to "be safe" for substitutability you don't use yet.
-
-### Interface Segregation
-Split an interface only when multiple clients already need disjoint subsets.
+Subtypes must be substitutable for their base types without breaking the program. If a subclass violates the parent's contract, the is-a relationship is wrong — don't paper over it with `isinstance` special-casing; avoid `isinstance` checks where possible.
 
 ```python
-# Don't: one interface, one implementation, one caller
-class Readable(Protocol): ...
-class Writable(Protocol): ...
-class Seekable(Protocol): ...
-# all three implemented by the same single class for the same single caller
+# Don't — Square breaks Rectangle's width/height invariant
+class Rectangle:
+    def __init__(self, w: float, h: float) -> None:
+        self.w, self.h = w, h
+    def set_width(self, w: float) -> None:
+        self.w = w
+    def set_height(self, h: float) -> None:
+        self.h = h
 
-# Do: split when a second, genuinely different client shows up
-# (a read-only consumer that must not be able to write)
+class Square(Rectangle):
+    def set_width(self, w: float) -> None:
+        self.w = self.h = w   # silently breaks the height invariant
+
+# Do — model them as peers, not parent/child
+class Shape: ...
+class Rectangle(Shape): ...
+class Square(Shape): ...
+```
+
+```python
+# Don't — isinstance special-casing to make a broken hierarchy work
+def area(shape: Shape) -> float:
+    if isinstance(shape, Square):
+        return shape.w * shape.w
+    return shape.w * shape.h
+
+# Do — each shape owns its own area(); no branching on type
+def area(shape: Shape) -> float:
+    return shape.area()
+```
+
+### Interface Segregation
+Don't force clients to depend on methods they don't use. Split an interface only when multiple clients need disjoint subsets. Use `ABC` for explicit inheritance-checked contracts and `Protocol` for structural ones; when using `Protocol`, enforce its typing with `mypy`/`pyright` wired into pre-commit and `pyproject.toml` so the structural contract is actually checked.
+
+```python
+# ABC — explicit; subclasses must implement
+from abc import ABC, abstractmethod
+
+class Reader(ABC):
+    @abstractmethod
+    def read(self, n: int) -> bytes: ...
+
+class FileSink(Reader):
+    def read(self, n: int) -> bytes: ...
+```
+
+```python
+# Protocol — structural; no inheritance required
+from typing import Protocol
+
+class Readable(Protocol):
+    def read(self, n: int) -> bytes: ...
+
+def consume(r: Readable) -> bytes:
+    return r.read(1024)   # any object with a matching read() satisfies it
+```
+
+Enforce Protocol typing in `pyproject.toml` and pre-commit:
+```toml
+[tool.mypy]
+strict = true
+```
+```yaml
+# .pre-commit-config.yaml
+- repo: https://github.com/pre-commit/mirrors-mypy
+  rev: v1.10.0
+  hooks:
+    - id: mypy
+```
+
+```python
+# Don't — one fat interface, one implementation, one caller
+class ReadWriteSeek(Protocol):
+    def read(self, n: int) -> bytes: ...
+    def write(self, b: bytes) -> int: ...
+    def seek(self, off: int) -> int: ...
+# all three implemented by one class for one caller that only reads
 ```
 
 ### Dependency Inversion
-Invert across a boundary you actually have two implementations for, or a
-boundary you actually need to fake in tests.
+Depend on abstractions, not concretions. High-level code depends on an interface (Protocol/ABC) and the concrete implementation is injected, so the high-level code is testable and swappable. Invert only across a boundary you actually have two implementations for, or one you need to fake in tests.
 
 ```python
-# Do: two real implementations exist (card, wallet)
-class Authorizer(Protocol):
-    def authorize(self, amount: float) -> bool: ...
+# Do — high-level checkout depends on an abstraction, injected
+class PaymentGateway(Protocol):
+    def charge(self, amount: float) -> bool: ...
 
-# Don't: interface + factory + DI container wrapping one concrete call
-# "for testability" when nothing else will ever implement it and a
-# plain monkeypatch of the one function would test it fine
+class Checkout:
+    def __init__(self, gateway: PaymentGateway) -> None:
+        self.gateway = gateway
+    def pay(self, amount: float) -> bool:
+        return self.gateway.charge(amount)
+
+# Don't — interface + factory + DI container wrapping one concrete call
+# "for testability" when a plain monkeypatch would test it fine
 ```
 
 ## DRY — merge by shared change-reason, not by shared shape
@@ -112,13 +151,13 @@ coincidental duplication, not knowledge duplication. Merging them is the
 
 ```python
 # Don't: collapsed because they looked similar today
-def calc_fee(item, kind, cfg):
+def calc_fee(item: Item, kind: str, cfg: Config) -> float:
     if kind == "shipping": ...   # changes with carrier/insurance rules
     if kind == "bank": ...       # changes with bank transfer regulations
 
 # Do: keep them separate; they will diverge for unrelated reasons
-def shipping_fee(item): ...
-def bank_fee(item): ...
+def shipping_fee(item: Item) -> float: ...
+def bank_fee(item: Item) -> float: ...
 ```
 
 Test before extracting: "if I edit this shared function, is there a caller
@@ -140,52 +179,40 @@ class SesEmail(EmailProvider): ...
 config = load("provider", "retries", "queue", "webhook_url")
 
 # Do: implement the one requested path
-def on_signup(user):
+def on_signup(user: User) -> None:
     send_welcome_email(user)
 ```
 Generalize when the second requirement actually arrives, and generalize by
 refactoring the concrete code you already have (with tests), not by guessing
 the shape in advance.
 
-## Balance rules for this agent's output
+## Composition over inheritance
 
-1. YAGNI is the tie-breaker: any abstraction with zero current consumers gets
-   rejected or deferred, regardless of which SOLID letter justifies it.
-2. The "who else?" test: every proposed split/interface/strategy must name a
-   concrete second user. No name, no extract.
-3. DRY by change-reason, not by shape: prefer duplication over merging code
-   that will diverge for unrelated reasons.
-4. Cost lens for hot paths: in performance-sensitive code (a Godot
-   `_process`/`_physics_process` callback, a per-batch training step, a
-   per-mesh bmesh operation), indirection (virtual dispatch, extra interface
-   layers) has a real, measurable cost — don't pay it for structure that
-   isn't earning its keep there.
-5. Default to the simplest correct concrete implementation for the stated
-   requirement. Ask "what is the smallest slice that satisfies what was
-   actually asked?" before reaching for a pattern.
-6. When abstraction is genuinely warranted, extract it from working, tested
-   concrete code after the second use case appears — don't design it ahead
-   of time from imagined future cases.
+Favor composition over inheritance. Avoid large inheritance DAGs in favor of shallow (one level) or no inheritance, and compose small independent objects instead. Inheritance locks in a rigid hierarchy and makes changes ripple; composition lets you swap pieces independently.
+
+```python
+# Don't — deep inheritance chain
+class Vehicle: ...
+class Car(Vehicle): ...
+class RaceCar(Car): ...
+class F1Car(RaceCar): ...
+
+# Do — compose capabilities
+class Engine: ...
+class Aerodynamics: ...
+class F1Car:
+    def __init__(self, engine: Engine, aero: Aerodynamics) -> None:
+        self.engine = engine
+        self.aero = aero
+```
+
+## Balance
+
+SOLID is only good up to the point where it negatively impacts performance — too much breakdown of responsibilities into high-overhead objects beats performant code. Apply SOLID where it earns its keep, default to the simplest correct concrete implementation, and let YAGNI be the tie-breaker.
 
 ## Sources
 
-- https://blog.cleancoder.com/uncle-bob/2014/05/08/SingleReponsibilityPrinciple.html
-- https://blog.cleancoder.com/uncle-bob/2014/05/12/TheOpenClosedPrinciple.html
+- https://en.wikipedia.org/wiki/SOLID
 - https://en.wikipedia.org/wiki/Liskov_substitution_principle
 - https://en.wikipedia.org/wiki/Interface_segregation_principle
 - https://en.wikipedia.org/wiki/Dependency_inversion_principle
-- https://stackoverflow.blog/2021/11/01/why-solid-principles-are-still-the-foundation-for-modern-software-architecture/
-- https://www.computerenhance.com/p/clean-code-horrible-performance
-- https://github.com/unclebob/cmuratori-discussion/blob/main/cleancodeqa.md
-- https://vimeo.com/157708450
-- https://www.sandimetz.com/blog/2016/1/20/the-wrong-abstraction
-- https://en.wikipedia.org/wiki/Don%27t_repeat_yourself
-- https://en.wikipedia.org/wiki/Rule_of_three_(computer_programming)
-- https://infiniteundo.com/post/158826857988/software-as-narrative-11n
-- https://martinfowler.com/bliki/Yagni.html
-- https://en.wikipedia.org/wiki/You_aren%27t_gonna_need_it
-- https://www.gitclear.com/coding_on_copilot_data_shows_ais_downward_pressure_on_code_quality
-- https://dora.dev/dora-report-2024/
-- https://arxiv.org/abs/2412.18989
-- https://github.com/cloud-atlas-ai/superego
-- https://news.ycombinator.com/item?id=23612415

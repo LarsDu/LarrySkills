@@ -9,26 +9,40 @@ Scope: pytest idioms, fixtures, mocking-at-boundaries, what separates a good tes
 
 ## Do / Don't
 
-### Fixtures: request by argument, choose scope, yield for teardown
+### Fixtures
 
-Default fixture scope is per-function; scope up (`module`, `session`) only when setup is genuinely expensive. Let the fixture own teardown via `yield`.
+Define shared setup in `conftest.py` as `@pytest.fixture` and request it by argument. Scope up (`module`, `session`) only when setup is genuinely expensive, and let the fixture own teardown via `yield`. Prefer `tmp_path` (unique per test, auto-cleaned) or `tempfile.TemporaryDirectory()` so tests never write to the real project filesystem; `monkeypatch` auto-reverts env and attribute patches.
 
+`conftest.py`:
 ```python
-# Don't: hand-rolled cleanup in every test
-def test_upload():
-    d = tempfile.mkdtemp()
-    try:
-        write(d, ...)
-    finally:
-        shutil.rmtree(d)
+from pathlib import Path
+import pytest
 
-# Do
 @pytest.fixture
-def upload_dir(tmp_path):
-    return tmp_path / "uploads"
+def upload_dir(tmp_path: Path) -> Path:
+    d = tmp_path / "uploads"
+    d.mkdir()
+    return d
 ```
 
-Avoid fixture overuse: a fixture that merely constructs one object is a fixture smell — use a plain helper. Distinct resource variants belong in `@pytest.mark.parametrize`, not near-identical fixtures. Never share mutable session-scoped state across tests (breaks isolation).
+`test_upload.py`:
+```python
+from pathlib import Path
+import tempfile
+
+def test_files_landed_in_upload_dir(upload_dir: Path) -> None:
+    target = upload_dir / "file.bin"
+    write_bytes(target, b"...")
+    assert target.exists()
+
+def test_uses_tempdir_no_real_fs_writes() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "out.log"
+        write_text(out, "...")
+        assert out.read_text() == "..."
+```
+
+Avoid fixture overuse: a fixture that merely constructs one object is a smell — use a plain helper. Distinct resource variants belong in `@pytest.mark.parametrize`, not near-identical fixtures. Never share mutable session-scoped state across tests (breaks isolation).
 
 ### Parametrize kills copy-paste tests
 
@@ -36,46 +50,40 @@ Parametrized cases get free per-case failure names and `ids=` for readability.
 
 ```python
 # Don't
-def test_discount_0():    assert discount(0) == 0
-def test_discount_50():   assert discount(50) == 25
-def test_discount_100():  assert discount(100) == 60
+def test_discount_0() -> None:    assert discount(0) == 0
+def test_discount_50() -> None:   assert discount(50) == 25
+def test_discount_100() -> None:  assert discount(100) == 60
 
 # Do
-@pytest.mark.parametrize("qty,expected", [(0,0),(50,25),(100,60)],
-                         ids=("zero","half","cap"))
-def test_discount(qty, expected):
+@pytest.mark.parametrize("qty,expected", [(0, 0), (50, 25), (100, 60)],
+                         ids=("zero", "half", "cap"))
+def test_discount(qty: int, expected: int) -> None:
     assert discount(qty) == expected
-```
-
-### Built-in fixtures instead of patching the filesystem/env
-
-`tmp_path` is unique per test; `monkeypatch` auto-reverts. Don't write into cwd or hand-save/restore environment variables.
-
-```python
-def test_writes_log(tmp_path):
-    p = tmp_path / "out.log"
-    app.write_log(p)
-    assert p.exists()
-
-def test_missing_env(monkeypatch):
-    monkeypatch.delenv("DATABASE_URL")
-    assert config() is None
 ```
 
 ### Mock at boundaries, not internals
 
-Patch only slow/unavailable/external boundaries (API call, DB connection). Mocking the logic under test produces tests that can't fail.
+Patch only slow, unavailable, or external boundaries (HTTP calls, DB connections, the clock). Mocking the logic under test produces tests that can't fail. Prefer `monkeypatch` for module attributes/env; use `unittest.mock.patch` (or `Mock`/`AsyncMock`) when you need to assert on call interactions at a real boundary.
 
 ```python
-# Don't: patches the thing being tested — test always passes
-def test_calc(monkeypatch):
+from unittest.mock import MagicMock
+
+# Don't — patches the thing being tested; the test always passes
+def test_calc(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(FastMath, "add", lambda a, b: 4)
     assert FastMath().add(2, 2) == 4
 
-# Do: patch only the outside boundary; real logic executes
-def test_api_client(monkeypatch):
-    monkeypatch.setattr(requests, "post", fake_resp)
-    assert submit(api, data)
+# Do — patch only the outside boundary; real logic executes
+def test_submit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(requests, "post", fake_post)
+    assert submit(api, {"x": 1})
+
+# Do — patch an external client at the seam and assert on the boundary call
+def test_checkout_charges_gateway() -> None:
+    gateway = MagicMock()
+    gateway.charge.return_value = True
+    assert Checkout(gateway).pay(9.99)
+    gateway.charge.assert_called_once_with(9.99)
 ```
 
 ### Good tests: behavioral and structure-insensitive
@@ -84,7 +92,7 @@ Kent Beck's Test Desiderata: a test is Behavioral ("if the behavior changes, the
 
 ### No flakiness
 
-Flakiness comes from un-isolated system state: re-testy, overly strict assertions, ordering dependence, global mutation, parallel interference. Ban raw `time.sleep`, `random`, live network, wall-clock comparisons. Use `monkeypatch` for time/env.
+Flakiness comes from un-isolated system state: re-testy, overly strict assertions, ordering dependence, global mutation, parallel interference. Use `monkeypatch` for time/env, and see [Reproducibility / seeding](#reproducibility--seeding) for randomness.
 
 ### No tautological tests
 
@@ -93,6 +101,24 @@ A test that always passes — because it asserts the mocked behavior it injected
 ### Coverage is a signal, not a target
 
 Line coverage measures only execution, not verification. Upgrade the signal with mutation testing (mutmut): it injects small faults (e.g. `==` -> `!=`) and flags surviving mutants as tests that failed to observe a behavior change. Treat survived mutants, not raw coverage, as the target.
+
+### Reproducibility / seeding
+
+Seed every source of randomness so a failing test reproduces. Seed Python, NumPy, and PyTorch explicitly:
+
+```python
+import random
+import numpy as np
+import torch
+
+def seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+```
+
+For pytest, seed via a session fixture or `pytest-randomly` (it seeds by default and logs the seed on failure). Prefer fixed inputs or parametrized values over `random.random()` in tests; when randomness is unavoidable, seed it.
 
 ## Review checklist for an AI-generated test suite
 
@@ -113,7 +139,7 @@ Property-based testing shines for open-ended input spaces where a human can't en
 
 ```python
 @given(st.lists(st.integers()))
-def test_sort_length_and_membership(lst):
+def test_sort_length_and_membership(lst: list[int]) -> None:
     out = sorted(lst)
     assert len(out) == len(lst)
     assert set(out) == set(lst)

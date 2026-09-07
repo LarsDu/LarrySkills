@@ -15,51 +15,58 @@ Don't. The default binds once at def time and persists across calls.
 
 ```python
 # Don't
-def append_item(item, items=[]):
+def append_item(item: str, items: list[str] = []) -> list[str]:
     items.append(item)
     return items
 
 # Do
-def append_item(item, items=None):
+def append_item(item: str, items: list[str] | None = None) -> list[str]:
     items = [] if items is None else items
     items.append(item)
     return items
 ```
 
-### Late-binding closures in loops
-
-Don't capture a loop variable and call the closure later. It reads the final value of the binding.
+The same trap bites `dict` defaults:
 
 ```python
-# Don't — all handlers print 3
-handlers = [lambda: i for i in range(3)]
+# Don't — shared across calls
+def register(name: str, opts: dict[str, str] = {}) -> dict[str, str]:
+    opts[name] = "on"
+    return opts
 
 # Do
-handlers = [lambda i=i: i for i in range(3)]
+def register(name: str, opts: dict[str, str] | None = None) -> dict[str, str]:
+    opts = {} if opts is None else opts
+    opts[name] = "on"
+    return opts
 ```
 
-### Circular imports via package `__init__.py`
+### Circular imports
 
-Don't import submodules inside `__init__.py` in a way that references each other during module setup. Prefer lazy imports inside functions, `from __future__ import annotations`, or type-only imports inside `if TYPE_CHECKING:` blocks when the import is only needed for annotations.
+Avoid circular imports by structuring modules so dependencies run one way: keep a clear layering (e.g. `models` -> `schemas` -> `utils`), put shared types in a leaf module that nothing imports back, and import only what you need at module top level. Reach for deferred (in-function) imports or `if TYPE_CHECKING:` only as a last resort when a genuine cycle can't be designed away.
 
 ```python
-# Don't — a/b import each other at module load
-# a.py:  import b    / b.py:  import a
+# Don't — a.py and b.py import each other at module load
+# a.py: import b    /  b.py: import a
 
-# Do — import inside the function, or import only for types
+# Do — shared types live in a leaf module both depend on; no cycle
+# schemas.py
 from __future__ import annotations
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from .b import B
+from dataclasses import dataclass
 
-def make_b() -> "B":
-    from .b import B  # deferred
-    return B()
+@dataclass(frozen=True)
+class User:
+    name: str
+
+# a.py / b.py
+from .schemas import User   # one-way dependency through a leaf
 ```
+
+If a cycle is truly unavoidable, defer the import inside the function that needs it, and use `from __future__ import annotations` + `if TYPE_CHECKING:` for type-only imports.
 
 ### Packaging
 
-Prefer `pyproject.toml` (`[build-system]`, `[project]`, `[tool.uv]`, `[project.optional-dependencies]`) over legacy `setup.py`. Use `uv` or `pip install -e .` against pyproject. Do not hand-maintain `requirements.txt` plus a `setup.py` that disagree.
+Use `pyproject.toml` as the single source of project metadata and dependencies, and manage the environment with `uv`. Don't hand-maintain `requirements.txt` or `setup.py` — they drift from `pyproject.toml` and from each other.
 
 ```toml
 [build-system]
@@ -70,6 +77,26 @@ build-backend = "hatchling.build"
 name = "pkg"
 requires-python = ">=3.11"
 dependencies = ["requests>=2.31"]
+
+[tool.uv]
+dev-dependencies = ["pytest>=8", "mypy>=1.10"]
+```
+
+Add dependencies with `uv add <pkg>` (updates `pyproject.toml` and the lockfile) and sync with `uv sync`. Avoid ceiling pins (`<X`) unless a known incompatibility forces it — prefer floors (`>=X`) so transitive updates can resolve.
+
+If you use `pixi` instead of `uv` (conda-forge environments), declare the pixi project in the same `pyproject.toml`:
+
+```toml
+[tool.pixi.project]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "win-64"]
+
+[tool.pixi.dependencies]
+python = ">=3.11"
+numpy = "*"
+
+[tool.pixi.pypi-dependencies]
+pkg = { path = ".", editable = true }
 ```
 
 ### Paths
@@ -79,9 +106,11 @@ Prefer `pathlib.Path` over `os.path` string surgery. `Path` gives composable ope
 ```python
 # Do
 from pathlib import Path
-p = Path("data") / "raw" / "file.txt"
-p.parent.mkdir(parents=True, exist_ok=True)
-text = p.read_text(encoding="utf-8")
+
+def load_config() -> str:
+    p = Path("data") / "raw" / "file.txt"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p.read_text(encoding="utf-8")
 ```
 
 ### Bare except
@@ -108,6 +137,8 @@ except requests.HTTPError as exc:
 Use `except*` for `ExceptionGroup`, `from` to preserve context in `raise`.
 
 ```python
+def run_all() -> None: ...
+
 try:
     run_all()
 except (ValueError, TypeError) as exc:
@@ -127,17 +158,37 @@ class Point:
     y: float
 ```
 
+### Typed containers
+
+Don't pass around untyped `dict`s when the shape is fixed and known — use `TypedDict` (or a frozen dataclass) so callers get type-checked fields.
+
+```python
+# Don't — untyped dict; callers must remember key names and value types
+def make_user(raw: dict) -> dict:
+    return {"name": raw["name"], "age": int(raw["age"])}
+
+# Do
+from typing import TypedDict
+
+class User(TypedDict):
+    name: str
+    age: int
+
+def make_user(raw: dict[str, object]) -> User:
+    return {"name": str(raw["name"]), "age": int(raw["age"])}
+```
+
 ### asyncio: blocking calls inside async
 
 Don't call blocking sync I/O (files, `time.sleep`, `requests`, big CPU work) directly inside `async def` bodies — it stalls the whole event loop. Use `await asyncio.to_thread(...)` / `loop.run_in_executor(...)` for blocking I/O, and `asyncio.sleep` not `time.sleep`.
 
 ```python
 # Don't — sleeps the loop for everyone
-async def slow():
+async def slow() -> None:
     time.sleep(1)
 
 # Do
-async def slow():
+async def slow() -> None:
     await asyncio.sleep(1)
 ```
 
@@ -146,13 +197,15 @@ async def slow():
 Don't forget `await` on coroutines or you get a "coroutine was never awaited" warning and silent non-execution. Every call to an `async def` must be awaited or scheduled. Use `asyncio.gather` for concurrent tasks and collect the results — don't just fire tasks without awaiting them.
 
 ```python
+async def fetch(url: str) -> bytes: ...
+
 # Don't
-async def main():
+async def main() -> None:
     task = fetch(url)  # never runs
 
 # Do
-async def main():
-    results = await asyncio.gather(fetch(a), fetch(b))
+async def main() -> None:
+    results: list[bytes] = await asyncio.gather(fetch(a), fetch(b))
 ```
 
 ## Pitfalls: symptom -> cause -> fix

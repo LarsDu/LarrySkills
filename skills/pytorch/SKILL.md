@@ -64,15 +64,24 @@ loader = DataLoader(
 )
 ```
 
+For CUDA, `pin_memory=True` plus `tensor.to(device, non_blocking=True)` enables async host-to-device copies that overlap with compute — see the [pin_memory tutorial](https://docs.pytorch.org/tutorials/intermediate/pinmem_nonblock.html).
+
 ### Sync stalls
 
-`.item()` and `. cpu()` force a CPU<->GPU sync that stalls the pipeline. Accumulate and log in chunks, not per iteration.
+`.item()` and `.cpu()` force a CPU<->GPU sync that stalls the pipeline. Accumulate and log in chunks, not per iteration.
 
 ```python
 # Don't
 for i, batch in enumerate(loader):
     loss = train_step(batch)
     log(loss.item())          # sync every iteration
+
+# Do — accumulate the loss tensor, sync once per chunk
+total = torch.zeros((), device=device)
+for i, batch in enumerate(loader):
+    total = total + train_step(batch)
+    if i % 100 == 0:
+        log({"loss": (total / (i + 1)).item()})   # one sync per chunk
 ```
 
 ### zero_grad
