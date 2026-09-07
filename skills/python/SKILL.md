@@ -41,6 +41,21 @@ def register(name: str, opts: dict[str, str] | None = None) -> dict[str, str]:
     return opts
 ```
 
+### Late-binding closures in loops
+
+Don't capture a loop variable and call the closure later — it reads the final value of the binding. Bind the current value as a default arg, or use `functools.partial`.
+
+```python
+# Don't — all handlers print 3
+handlers = [lambda: i for i in range(3)]
+
+# Do
+handlers = [lambda i=i: i for i in range(3)]
+# or
+from functools import partial
+handlers = [partial(print, i) for i in range(3)]
+```
+
 ### Circular imports
 
 Avoid circular imports by structuring modules so dependencies run one way: keep a clear layering (e.g. `models` -> `schemas` -> `utils`), put shared types in a leaf module that nothing imports back, and import only what you need at module top level. Reach for deferred (in-function) imports or `if TYPE_CHECKING:` only as a last resort when a genuine cycle can't be designed away.

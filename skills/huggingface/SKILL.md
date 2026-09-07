@@ -49,7 +49,7 @@ Don't `load_dataset` a multi-GB corpus without `streaming=True` — it downloads
 ```python
 ds = load_dataset("HuggingFaceFW/fineweb", split="train", streaming=True)
 for ex in itertools.islice(ds, 1000):
-    ...
+    process(ex)
 ```
 
 ### Accelerate device placement

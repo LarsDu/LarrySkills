@@ -48,13 +48,13 @@ trainer = Trainer(callbacks=[
 
 ### Mixed precision
 
-Use `Trainer(precision=...)` — Lightning wires `torch.autocast` and the `GradScaler` for you. `"16-mixed"` (fp16) needs a scaler; `"bf16-mixed"` does not (Ampere+). Don't add your own `torch.autocast`/`GradScaler` in step methods under automatic optimization.
+Use `Trainer(precision=...)` — Lightning wires `torch.autocast` and the `GradScaler` for you. Don't add your own `torch.autocast`/`GradScaler` in step methods under automatic optimization.
 
 ```python
 trainer = Trainer(accelerator="gpu", devices=4, precision="16-mixed")
 ```
 
-Under manual optimization (`self.automatic_optimization = False`), Lightning no longer manages AMP — run `torch.autocast` and `torch.amp.GradScaler` yourself, exactly as in the `pytorch` skill.
+Prefer `"bf16-mixed"` on Ampere+ GPUs: it has the same range as fp32 (no `GradScaler` needed, fewer NaNs) at near-fp16 speed. Use `"16-mixed"` (fp16) on older GPUs — it needs a scaler and is more prone to under/overflow. Under manual optimization (`self.automatic_optimization = False`), Lightning no longer manages AMP — run `torch.autocast` and `torch.amp.GradScaler` yourself, exactly as in the `pytorch` skill.
 
 ### Flags that fix real bugs
 

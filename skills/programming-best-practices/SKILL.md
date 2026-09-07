@@ -41,6 +41,7 @@ def damage_for(role: str, base: float) -> float:
 class DamageStrategy(ABC): ...
 class DamageStrategyFactory: ...
 ```
+A plain conditional satisfies OCP here because adding a new role adds a new line without editing existing branches — the existing code is closed for modification. Reach for dynamic dispatch only when new variants actually arrive and a conditional stops paying its keep.
 
 ### Liskov Substitution
 Subtypes must be substitutable for their base types without breaking the program. If a subclass violates the parent's contract, the is-a relationship is wrong — don't paper over it with `isinstance` special-casing; avoid `isinstance` checks where possible.

@@ -13,23 +13,18 @@ Run bpy code via `blender --background --python script.py`. Full API, but no win
 
 ## Choosing the right mesh API
 
-- `bmesh` for topology mutation (extrude, bevel, inset, dissolve, booleans, editing UVs). It is a full editable copy that you must `free()`.
-- `Mesh.from_pydata` for simple one-shot static construction from plain vertex/face arrays (no repeated edits).
+- `bmesh` for topology mutation (extrude, bevel, inset, dissolve, booleans, UVs). It is an editable copy you must `free()`.
+- `Mesh.from_pydata` for one-shot static construction from vertex/face arrays.
 
-### from_pydata misuse
-
-Do:
 ```python
+# Do — faces are index sequences; always me.update() after populating
 me = bpy.data.meshes.new("MyMesh")
-me.from_pydata(verts, [], faces)   # faces = list of index sequences
-me.update()                        # refresh loops/edges/tessellation caches
-```
+me.from_pydata(verts, [], faces)
+me.update()
 
-Don't:
-```python
-me.from_pydata(verts, edges, [0, 1, 2, 3])  # faces entries must be indexable sequences, not bare ints
+# Don't — bare ints are not indexable sequences; out-of-range indices silently drop verts
+me.from_pydata(verts, edges, [0, 1, 2, 3])
 ```
-Out-of-range face indices silently drop vertices and produce "internal error setting the array". Always call `me.update()` after populating.
 
 ## The bpy.ops context trap (the #1 agent failure)
 
@@ -54,38 +49,26 @@ bpy.ops.object.mode_set(mode='OBJECT')
 
 ## bmesh lifecycle
 
-Edit-mode bmesh requires the object to actually be in edit mode, which itself requires GUI/ops context. For agent code, prefer the object-mode path — it is headless-safe and context-independent.
+Prefer the object-mode path — it is headless-safe and context-independent.
 
-Don't:
 ```python
-bm = bmesh.from_edit_mesh(me)   # RuntimeError unless me is in edit mode
-```
-
-Do (object mode — the preferred default for generated code):
-```python
+# Do (object mode — the default for generated code)
 bm = bmesh.new()
-bm.from_mesh(me)                      # or bm.from_object(ob, depsgraph)
-bm.normal_update()                    # recalc normals
-bm.transform(mat)                     # apply transforms directly on bm
+bm.from_mesh(me)          # or bm.from_object(ob, depsgraph)
+bm.normal_update()
 bm.to_mesh(me)
-bm.free()                             # must free explicitly
+bm.free()                # must free explicitly
+
+# Don't — RuntimeError unless me is in edit mode
+bm = bmesh.from_edit_mesh(me)
 ```
 
-Do (in-GUI/edit-mode contexts only):
-```python
-bpy.context.view_layer.objects.active = obj
-bpy.ops.object.mode_set(mode='EDIT')
-bm = bmesh.from_edit_mesh(obj.data)
-# ... mutate ...
-bmesh.update_edit_mesh(obj.data, loop_triangles=True)
-bpy.ops.object.mode_set(mode='OBJECT')
-```
+`bmesh.from_edit_mesh` is for in-GUI/edit-mode contexts only; if you must use it, set the object active and `mode_set(mode='EDIT')` first, then `bmesh.update_edit_mesh(obj.data, loop_triangles=True)` after mutating.
 
 ## N-gons and triangulation
 
-N-gons are valid Blender faces (quads/tris are a special case), but they carry hidden internal triangulation and break booleans, sculpting, animation deformation, and many export checks. Triangulate at the end for game assets.
+N-gons carry hidden internal triangulation and break booleans, sculpting, deformation, and export checks. Triangulate at the end for game assets.
 
-Do:
 ```python
 bm = bmesh.new()
 bm.from_mesh(me)
@@ -96,11 +79,7 @@ bm.free()
 
 ## Non-manifold geometry
 
-Caused by internal faces, disconnected elements, or zero-thickness areas; breaks booleans, modifiers, refraction rendering, and 3D printing. Detect via `select_non_manifold` (in edit mode); cheap fix:
-
-```python
-bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=0.00001)  # kill zero-area/zero-length
-```
+Caused by internal faces, disconnected elements, or zero-thickness areas; breaks booleans, modifiers, and 3D printing. Detect via `select_non_manifold` (in edit mode); cheap fix: `bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=0.00001)`.
 
 ## UV unwrapping
 
@@ -128,9 +107,8 @@ Blender frequently leaves face normals flipped inward on generated geometry — 
 
 ## Naming and collection hygiene
 
-Generated content should be isolated so the agent's work is easy to delete and never collides with user data.
+Isolate generated content under a dedicated child collection so it is easy to delete and never collides with user data. Use `Category_Part` names (the auto-`.001` suffix guarantees uniqueness).
 
-Do:
 ```python
 col = bpy.data.collections.new("Agent_Props")
 bpy.context.scene.collection.children.link(col)
@@ -139,14 +117,12 @@ ob = bpy.data.objects.new("Prop_HexBolt", me)
 col.objects.link(ob)
 ```
 
-Conventions: `Category_Part` names (the auto-`.001` suffix guarantees uniqueness), and one dedicated child collection per agent session.
+## Workflow (verify-loop)
 
-## Workflow (Verify-loop)
-
-1. Inspect the current scene/objects before mutating anything (get_scene_info / get_object_info equivalent if a bridge exposes them).
-2. Act in small, idempotent chunks — one script per logical step, not one giant build.
-3. Verify after each step: read back `obj.dimensions` / world bounding box, take a viewport screenshot when available.
-4. Only touch the assets within scope of the request; leave the rest of the scene alone.
+1. Inspect the scene before mutating.
+2. Act in small, idempotent chunks — one script per logical step.
+3. Verify after each step: read back `obj.dimensions` / world bounding box; compare against intent.
+4. Touch only assets within scope of the request.
 
 ## Sources
 
