@@ -115,17 +115,44 @@ Whole-object recolor = move one UV point. Palette swap = replace the texture. En
 ## Block modeling workflow
 
 1. **Start primitive** (usually the default cube), `Tab`, scale/move into the largest mass of the subject.
-2. **Order for characters**: pelvis/torso mass first → legs → feet → chest → arms → hands → neck → big head. Mechs: hip block first → legs → belly → arms → head sunk into body.
+2. **Order for characters**: pelvis box first → split the pelvis bottom face (loop cut at x=0 for the groin) → extrude legs down from the two bottom faces → extrude torso up from the pelvis top → arms outward from the chest side faces → neck → big head. Mechs: hip block first → legs → belly → arms → head sunk into body.
 3. **Ops vocabulary**: `E` extrude (twice at knees/elbows — at least one loop so limbs bend), `S`/`G`/`R` with axis locks, `Ctrl+R` loop cuts, `I` inset (`I,I` = individual), `Alt+E` extrude along face normals (belts, armor panels, hair volume; hold `Alt` mid-op for even thickness), `Alt+S` shrink/fatten, `Ctrl+B` bevel, `K` knife (adds auto-connecting edges — avoid on deformable bodies), `Shift+D` + RMB-snap-back to duplicate a face into a new part, `O` proportional edit (use `Alt+O` connected-only on multi-part meshes), `.` pivot → Individual Origins, `,` orientation → Normal (`S,Z,0` flattens).
 4. **Mirror**: half-model + Mirror modifier **with Clipping on**, X axis (or the built-in *Auto Mirror* add-on). Disable clipping only momentarily (eyes, scaling at centerline) then re-enable — verts crossing center break the mesh. For asymmetric details: apply the mirror (`Ctrl+A`) as *late* as possible, then edit one side.
 5. **Scale trick**: `S, Z, 0, Enter` flattens selection to Z=0 (feet flat on ground), with `.` → Individual Origins for multiple islands.
 
 Topology rules:
 
+- **Character bodies are ONE continuous mesh grown by extrusion** — see the next section. Disconnected shells are for rigid props and small detachable details only (eyes, hats, gear, pegs, armor plates).
 - Loop cuts go **around** limbs/waist/head, never vertical bands through the body — they add polys and hurt deformation.
 - Keep joint loops (knee, elbow, ankle, wrist) even on ultra-low-poly bodies; a single-bone "stilt" leg cannot bend.
 - N-gons/tris are fine on **static props**; quads around joints for anything armature-deformed.
-- Many small **disconnected parts inside one object** is the norm for props (select with `L`); saves cleanup.
+- For props, many small **disconnected parts inside one object** is the norm (select with `L`); saves cleanup.
+
+### Extruded continuous body (characters)
+
+Limbs are extruded out of the main body mass, never assembled from separate box shells. This is what makes skinning work: bone heat spreads smoothly across shared vertices, and joints blend naturally. A detached limb box can only ever be 100% one bone — it shears at the seam instead of bending.
+
+- **Legs**: extrude each pelvis-bottom half straight down, extrude again past the knee (that second ring is the joint loop), flatten the foot (`S,Z,0`), stretch its front verts forward for a toe.
+- **Torso**: extrude the pelvis top face up in segments — every segment ring is a natural color band (belt, shirt stripes).
+- **Arms**: extrude the chest side face(s) outward as a region, then scale the new face down to arm cross-section (this makes the tapered shoulder), extrude on for upper arm → forearm → hand.
+- **Neck/head**: extrude the torso top face up and scale it narrow for the neck, wide again for the head; extrude head bands for beard/eyes/crown color zones.
+
+Headless, this is all `bmesh.ops` (context-free, unlike `bpy.ops.mesh.*`):
+
+```python
+r = bmesh.ops.extrude_face_region(bm, geom=faces)     # the E key
+nv = {g for g in r['geom'] if isinstance(g, bmesh.types.BMVert)}
+for v in nv: v.co.z -= 0.28                            # the G key
+# optional S key: remap the new cap verts to a target cross-section (collectively,
+# so shared verts move once and the cap stays fused)
+cx = sum(v.co.x for v in nv) / len(nv)                 # ...scale about centroid per axis
+# walls are NOT returned in 'geom' -- find them via adjacency:
+new_faces = {f for v in nv for f in v.link_faces}
+walls = [f for f in new_faces if not set(f.verts) <= nv]   # 2 old + 2 new verts
+caps  = [f for f in new_faces if set(f.verts) <= nv]       # all-new verts = next extrude base
+```
+
+Notes: the original base face **survives** each extrusion as a single hidden interior boundary (no z-fight, but dissolve it if you need clean topology); split a face with `bmesh.ops.bisect_plane` (loop-cut equivalent — dedupe the `geom` list or it raises); call `bm.normal_update()` before classifying walls by `face.normal` for per-face colors (belt buckle front, boot toe, sole).
 
 Character conventions (game-ready):
 
@@ -152,8 +179,8 @@ Bone structure (`.L`/`.R` suffix mandatory for Symmetrize):
 |---|---|---|
 | Center | `pelvis` → `spine 1` → `spine 2` → `head` | connected chain; pelvis bone at hips pointing up Z; slight natural S-curve |
 | Arm (each side) | `shoulder.L` (disconnected, sits at clavicle) → `upper arm.L` → `lower arm.L` → `hand.L` | elbow gets a slight backward bend so IK/FK fold direction is unambiguous |
-| Leg (each side) | `upper leg.L` → `lower leg.L` → `foot.L` | upper leg **parented to pelvis with Keep Offset** (dotted line, not connected); knee slight forward dent; foot bone from heel to toe |
-| IK helpers (each side) | `ik leg pole.L`, `ik leg target.L` | `use_deform = False` on both; pole placed in front of the kneecap, target at the heel/ankle |
+| Leg (each side) | `upper leg.L` → `lower leg.L` → `foot.L` | upper leg **parented to pelvis with Keep Offset** (dotted line, not connected); knee slight forward dent; foot bone runs heel (just above ground) → toe (at ground level) — the toe is the roll pivot |
+| IK helpers (each side) | `ik leg pole.L`, `ik leg target.L` | short stubs extruded from the knee and ankle joints (side view) then clear-parented; `use_deform = False` on both; pole ends up just in front of the kneecap, target stays at the ankle |
 
 Headless construction (tested): build `.L` side with `arm.edit_bones`, then **`bpy.ops.armature.select_all(action='SELECT')` before `bpy.ops.armature.symmetrize()`** — symmetrize silently returns CANCELLED without full selection (new edit bones aren't fully selected by default). Set `Viewport Display → In Front` so bones show through the mesh.
 
@@ -168,6 +195,12 @@ c.pole_target = arm_ob; c.pole_subtarget = 'ik leg pole.L'
 c.chain_count = 2                      # thigh + shin only
 c.pole_angle  = math.radians(90)       # knee points forward; if leg flips sideways, roll/angle is off
 ```
+
+Helper-bone geometry (what makes the rig read and animate conventionally):
+
+- `ik leg pole.L`: a short stub whose body sits just in front of / above the kneecap, pointing forward (+Y). Only its position matters to the solver.
+- `ik leg target.L`: a short stub with its **head on the ankle joint**, pointing forward roughly parallel to the foot bone, kept at or above ground level. Its head position is the IK goal; its local rotation is what drives the foot roll through the Copy Rotation constraint — a forward-pointing target keeps that rotation intuitive, and the stub stays visible on/above the ground instead of poking through the floor.
+- `foot.L`: head (heel) just above the ground, tail at the toe **on** the ground — the toe is the pivot when the foot rolls.
 
 Foot rig (keeps the sole flat when the pelvis lowers):
 
@@ -226,6 +259,9 @@ Don't: stretch UV islands over busy photo regions unless you want noise
 Do: mirror modifier with clipping on; apply late for asymmetry
 Don't: let verts cross the mirror centerline with clipping off
 
+Do: extrude limbs out of the main body mass — one continuous mesh per character
+Don't: attach limbs as separate box shells (auto weights can't blend across the gap)
+
 Do: loop cuts at knees/elbows/ankles even on ultra-low-poly rigs
 Don't: add vertical loop cuts through the body or knife-cut deformables
 
@@ -234,6 +270,9 @@ Don't: use automatic weights on rigid plates (they shear)
 
 Do: recalc bone roll (front view / GLOBAL_POS_Z) before IK and pose mirroring
 Don't: forget use_deform=False on IK pole/target helper bones
+
+Do: put the IK target's head on the ankle joint, stub pointing forward along the foot
+Don't: dangle IK target/pole bones below the ground plane
 
 Do: duplicate body faces to make clothes (weights come free)
 Don't: expect auto weights to handle detached eyes/hats — assign to one bone
