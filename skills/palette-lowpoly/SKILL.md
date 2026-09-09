@@ -134,7 +134,7 @@ Limbs are extruded out of the main body mass, never assembled from separate box 
 
 - **Legs**: extrude each pelvis-bottom half straight down, extrude again past the knee (that second ring is the joint loop), flatten the foot (`S,Z,0`), stretch its front verts forward for a toe.
 - **Torso**: extrude the pelvis top face up in segments — every segment ring is a natural color band (belt, shirt stripes).
-- **Arms**: extrude the chest side face(s) outward as a region, then scale the new face down to arm cross-section (this makes the tapered shoulder), extrude on for upper arm → forearm → hand.
+- **Arms**: extrude the chest side face(s) straight out along ±X (the T-pose bind) as a region, then scale the new face down to arm cross-section (this makes the tapered shoulder), extrude on for upper arm → forearm → hand.
 - **Neck/head**: extrude the torso top face up and scale it narrow for the neck, wide again for the head; extrude head bands for beard/eyes/crown color zones.
 
 Headless, this is all `bmesh.ops` (context-free, unlike `bpy.ops.mesh.*`):
@@ -157,6 +157,7 @@ Notes: the original base face **survives** each extrusion as a single hidden int
 Character conventions (game-ready):
 
 - Cartoon proportions: ~3 heads tall, head ≈ torso ≈ legs; exaggerate.
+- Humanoids are modeled and bound in **T-pose**: arms straight out along ±X at shoulder height, legs straight down, feet flat on the ground, facing +Y. T-pose is the neutral for mirrored-pose pasting and IK/FK setup, it's what engines and Mixamo expect on import, and it's the pose the first `_TPose` action keys (see rigging).
 - Height ~1.8–2 m; **origin at (0,0,0) between the feet**; model **facing +Y** (Blender's green forward; Unity/Unreal import-friendly).
 - Backface Culling on while modeling (catches flipped normals); fix with recalculate-normals-outside.
 - Apply scale (`Ctrl+A`) before edit work or inset behaves wrong.
@@ -173,14 +174,14 @@ Character conventions (game-ready):
 
 ## Rigging — humanoid (custom minimal armature)
 
-Bone structure (`.L`/`.R` suffix mandatory for Symmetrize):
+Bone structure (`.L`/`.R` suffix mandatory for Symmetrize). **Bind pose: T-pose** — build the armature over a T-posed mesh: arm bones (shoulder → upper arm → forearm → hand) pointing straight out along ±X, legs straight down, feet flat on the ground. This is the neutral for `Ctrl+Shift+V` mirrored-pose pasting, what engines/Mixamo expect on import, and the pose the first `_TPose` action keys.
 
 | Chain | Bones | Notes |
 |---|---|---|
 | Center | `pelvis` → `spine 1` → `spine 2` → `head` | connected chain; pelvis bone at hips pointing up Z; slight natural S-curve |
 | Arm (each side) | `shoulder.L` (disconnected, sits at clavicle) → `upper arm.L` → `lower arm.L` → `hand.L` | elbow gets a slight backward bend so IK/FK fold direction is unambiguous |
 | Leg (each side) | `upper leg.L` → `lower leg.L` → `foot.L` | upper leg **parented to pelvis with Keep Offset** (dotted line, not connected); knee slight forward dent; foot bone runs heel (just above ground) → toe (at ground level) — the toe is the roll pivot |
-| IK helpers (each side) | `ik leg pole.L`, `ik leg target.L` | short stubs extruded from the knee and ankle joints (side view) then clear-parented; `use_deform = False` on both; pole ends up just in front of the kneecap, target stays at the ankle |
+| IK helpers (each side) | `ik leg pole.L`, `ik leg target.L` | short stubs extruded from the knee and ankle joints (side view) then clear-parented; `use_deform = False` on both; pole ends up just in front of the kneecap, target's head stays on the ankle with its tail poking out below/behind the heel |
 
 Headless construction (tested): build `.L` side with `arm.edit_bones`, then **`bpy.ops.armature.select_all(action='SELECT')` before `bpy.ops.armature.symmetrize()`** — symmetrize silently returns CANCELLED without full selection (new edit bones aren't fully selected by default). Set `Viewport Display → In Front` so bones show through the mesh.
 
@@ -199,7 +200,7 @@ c.pole_angle  = math.radians(90)       # knee points forward; if leg flips sidew
 Helper-bone geometry (what makes the rig read and animate conventionally):
 
 - `ik leg pole.L`: a short stub whose body sits just in front of / above the kneecap, pointing forward (+Y). Only its position matters to the solver.
-- `ik leg target.L`: a short stub with its **head on the ankle joint**, pointing forward roughly parallel to the foot bone, kept at or above ground level. Its head position is the IK goal; its local rotation is what drives the foot roll through the Copy Rotation constraint — a forward-pointing target keeps that rotation intuitive, and the stub stays visible on/above the ground instead of poking through the floor.
+- `ik leg target.L`: the heel IK control — its **head sits on the ankle joint** (that head position is the IK goal) and its tail angles down/back so the stub **pokes out visibly below or behind the heel**. A control you can't see and click in pose mode is a control you don't have: never bury it inside the foot volume. Its local rotation drives the foot roll through the Copy Rotation constraint (so rotating this bone rolls the foot) and translating it moves the whole leg.
 - `foot.L`: head (heel) just above the ground, tail at the toe **on** the ground — the toe is the pivot when the foot rolls.
 
 Foot rig (keeps the sole flat when the pelvis lowers):
@@ -271,8 +272,11 @@ Don't: use automatic weights on rigid plates (they shear)
 Do: recalc bone roll (front view / GLOBAL_POS_Z) before IK and pose mirroring
 Don't: forget use_deform=False on IK pole/target helper bones
 
-Do: put the IK target's head on the ankle joint, stub pointing forward along the foot
-Don't: dangle IK target/pole bones below the ground plane
+Do: bind humanoids in T-pose (arms straight out ±X, feet flat) and key it as the first action
+Don't: model or bind in A-pose/random poses — mirrored pasting and retargeting break
+
+Do: put the IK target's head on the ankle joint and let its tail poke out below/behind the heel
+Don't: bury IK controls inside the foot mesh where they can't be seen or selected
 
 Do: duplicate body faces to make clothes (weights come free)
 Don't: expect auto weights to handle detached eyes/hats — assign to one bone
