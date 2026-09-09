@@ -50,6 +50,10 @@ Godot (`godot-gamedev-agent`):
 
 Blender (`blender-agent`):
 - `blender-mesh-modeling` — bpy/bmesh procedural mesh construction pitfalls.
+- `palette-lowpoly` — low-poly game-asset technique: block-model from
+  primitives, colorize by pinning UV faces onto palette-texture swatches
+  (or a photograph), and rig humanoid/quadruped/mech characters with
+  minimal IK armatures.
 
 Low-cost orchestration (`scout`, `summarizer`):
 - `scouting` — read-only recon discipline: grep before read, report
