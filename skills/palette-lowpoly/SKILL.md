@@ -152,7 +152,12 @@ walls = [f for f in new_faces if not set(f.verts) <= nv]   # 2 old + 2 new verts
 caps  = [f for f in new_faces if set(f.verts) <= nv]       # all-new verts = next extrude base
 ```
 
-Notes: the original base face **survives** each extrusion as a single hidden interior boundary (no z-fight, but dissolve it if you need clean topology); split a face with `bmesh.ops.bisect_plane` (loop-cut equivalent — dedupe the `geom` list or it raises); call `bm.normal_update()` before classifying walls by `face.normal` for per-face colors (belt buckle front, boot toe, sole).
+Notes:
+
+- The original base face **survives** each extrusion as a hidden interior boundary — **delete these before skinning**: each one leaves a T-junction edge (3 faces), and non-manifold edges make the automatic-weights bone-heat solver abort *silently* (every vertex group comes out empty). Collect the input faces of every `extrude_face_region` call and `bmesh.ops.delete(context='FACES')` them at the end, then assert no edge has more than 2 `link_faces`.
+- `extrude_face_region` **flips the winding of the surviving input faces** — never select faces by `face.normal` after an extrusion: a mirrored limb build will match the flipped first side and extrude geometry back *into* the body. Select limb bases by face-center position, or grab every base before extruding any of them.
+- Split a face with `bmesh.ops.bisect_plane` (loop-cut equivalent — dedupe the `geom` list or it raises); call `bm.normal_update()` before classifying walls by `face.normal` for per-face colors (belt buckle front, boot toe, sole).
+- Welded stacks (e.g. a peg leg built from prisms) can keep one buried cap face on the weld ring — delete horizontal faces lying exactly on the weld plane, or they re-create a 3-face edge.
 
 Character conventions (game-ready):
 
@@ -215,7 +220,9 @@ Foot rig (keeps the sole flat when the pelvis lowers):
 
 ### Skinning
 
-- Organic bodies: mesh → Shift-select armature → `Ctrl+P` → Armature Deform **With Automatic Weights** (`bpy.ops.object.parent_set(type='ARMATURE_AUTO')` — verified headless). Usually good enough outright.
+- Organic bodies: mesh → Shift-select armature → `Ctrl+P` → Armature Deform **With Automatic Weights** (`bpy.ops.object.parent_set(type='ARMATURE_AUTO')` — verified headless). Usually good enough outright — but it fails **silently** (see the verify bullet below).
+- **Verify auto weights solved — always.** `ARMATURE_AUTO` is all-or-nothing: one problem aborts the entire solve and leaves *every* group empty, with nothing but a console warning. After parenting, count verts whose total weight across deform groups is ~0. Known abort triggers, all hit in practice: non-manifold edges from surviving extrusion base faces (see the extrusion note); **floating detached shells with no bone near them** — an earring-sized box 2cm off the head zeroes the whole solve (make truly floating cosmetics Child-Of props, not mesh islands; keep mesh-island details touching the body or surrounding a bone); bones parked far outside the mesh. Details that legitimately read zero even on success (eyes, patches) are exactly what the explicit 100% reassign below fixes — the final zero-weight count after reassigns must be 0.
+- **Headless deformation tests must read the evaluated mesh**: `ob.evaluated_get(bpy.context.evaluated_depsgraph_get()).to_mesh()` — `ob.data.vertices` are rest positions and never move. Measure displacement deltas (snapshot before posing, compare after), not absolute coordinates.
 - **Detached eyes / gear**: auto weights can't handle them. Edit mode → `L` select linked → vertex groups **Remove from All** → set active group (`head`) → **Assign** (100% to one bone). Same recipe for backpacks (`spine`), beards, etc.
 - **Detached hats/props as separate objects**: don't skin — **Child Of** object constraint → target armature, bone `head`, then **Set Inverse**.
 - **Hip/bum bleed**: leg weights leaking into the hip/buttock bulge when the leg rotates → weight-paint the leg bone to 0 on those verts.
@@ -279,6 +286,12 @@ Don't: model or bind in A-pose/random poses — mirrored pasting and retargeting
 
 Do: put the IK target's head on the ankle joint and let its tail poke out below/behind the heel
 Don't: bury IK controls inside the foot mesh where they can't be seen or selected
+
+Do: verify auto weights solved (count zero-weight verts) before posing
+Don't: trust ARMATURE_AUTO — one bad island silently empties every group
+
+Do: make floating cosmetics (earrings, badges) Child Of props
+Don't: leave detached shells with no bone near them in a skinned mesh
 
 Do: duplicate body faces to make clothes (weights come free)
 Don't: expect auto weights to handle detached eyes/hats — assign to one bone
