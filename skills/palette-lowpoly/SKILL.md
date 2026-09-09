@@ -203,6 +203,8 @@ Helper-bone geometry (what makes the rig read and animate conventionally):
 - `ik leg target.L`: the heel IK control — its **head sits on the ankle joint** (that head position is the IK goal) and its tail angles down/back so the stub **pokes out visibly below or behind the heel**. A control you can't see and click in pose mode is a control you don't have: never bury it inside the foot volume. Its local rotation drives the foot roll through the Copy Rotation constraint (so rotating this bone rolls the foot) and translating it moves the whole leg.
 - `foot.L`: head (heel) just above the ground, tail at the toe **on** the ground — the toe is the pivot when the foot rolls.
 
+Headless posing gotcha: pose-bone `location` is in the bone's **local** space (local Y runs along the bone), so a world-space intent like "move the target forward" must be converted — `pb.bone.matrix_local.to_3x3().inverted() @ world_vec` — or a control bone whose tail points down/back will move the limb the opposite way (this bites exactly when the heel control is made visible as above).
+
 Foot rig (keeps the sole flat when the pelvis lowers):
 
 1. `foot` bone: `use_inherit_rotation = False`.
