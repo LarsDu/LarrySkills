@@ -184,11 +184,13 @@ Bone structure (`.L`/`.R` suffix mandatory for Symmetrize). **Bind pose: T-pose*
 | Chain | Bones | Notes |
 |---|---|---|
 | Center | `pelvis` → `spine 1` → `spine 2` → `head` | connected chain; pelvis bone at hips pointing up Z; slight natural S-curve |
-| Arm (each side) | `shoulder.L` (disconnected, sits at clavicle) → `upper arm.L` → `lower arm.L` → `hand.L` | elbow gets a slight backward bend so IK/FK fold direction is unambiguous |
+| Arm (each side) | `shoulder.L` → `upper arm.L` → `lower arm.L` → `hand.L` | `shoulder.L` is **disconnected from the spine on purpose** (clear-parented, then moved out to the clavicle); `upper arm → lower arm → hand` is a **connected** chain (bones created by extruding connect automatically); elbow gets a slight backward bend so IK/FK fold direction is unambiguous |
 | Leg (each side) | `upper leg.L` → `lower leg.L` → `foot.L` | upper leg **parented to pelvis with Keep Offset** (dotted line, not connected); knee slight forward dent; foot bone runs heel (just above ground) → toe (at ground level) — the toe is the roll pivot |
 | IK helpers (each side) | `ik leg pole.L`, `ik leg target.L` | short stubs extruded from the knee and ankle joints (side view) then clear-parented; `use_deform = False` on both; pole ends up just in front of the kneecap, target's head stays on the ankle with its tail poking out below/behind the heel |
 
 Headless construction (tested): build `.L` side with `arm.edit_bones`, then **`bpy.ops.armature.select_all(action='SELECT')` before `bpy.ops.armature.symmetrize()`** — symmetrize silently returns CANCELLED without full selection (new edit bones aren't fully selected by default). Set `Viewport Display → In Front` so bones show through the mesh.
+
+Connection convention: **only two disconnections are intentional** — `shoulder`↔spine (clear-parented out to the clavicle) and `upper leg`↔pelvis (Keep Offset). Everything else (spine chain, arm chain, shin, foot) is a connected chain (`use_connect = True`): connected bones share the joint vertex, so the rig reads as one skeleton in the viewport and extruded chains stay rigid. A coincident-but-unconnected bone joint is almost always a bug — verify with `[b.name for b in arm.bones if b.parent and not b.use_connect]` and expect only the four intentional ones (`shoulder.L/.R`, `upper leg.L/.R`).
 
 **Roll before anything else**: front-orthographic view + `Shift+N` (Recalculate Roll, View Axis) interactively; headless `bpy.ops.armature.calculate_roll(type='GLOBAL_POS_Z')` works. Skipping this breaks mirrored-pose paste and the pole-angle flip later.
 
